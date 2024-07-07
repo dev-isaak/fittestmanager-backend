@@ -21,6 +21,9 @@ const stripe = Stripe(Deno.env.get("STRIPE_API_KEY"), {
   httpClient: Stripe.createFetchHttpClient(),
 });
 
+const convertTimestamp = (timestamp) =>
+  new Date(timestamp * 1000).toISOString();
+
 Deno.serve(async (request) => {
   const signature = request.headers.get("Stripe-Signature");
 
@@ -39,12 +42,52 @@ Deno.serve(async (request) => {
     return new Response(err.message, { status: 400 });
   }
 
-  console.log(receivedEvent);
+  console.log(`EVENT: ${receivedEvent.type} `, receivedEvent);
+
+  // ----------------------------- PRODUCT CREATED -----------------------------
+
+  if (receivedEvent.type === "product.created") {
+    const { data, error } = await supabase
+      .from("products")
+      .insert({
+        id: receivedEvent.data.object.id,
+        active: receivedEvent.data.object.active,
+        name: receivedEvent.data.object.name,
+        image: receivedEvent.data.object.images[0],
+        description: receivedEvent.data.object.description,
+      });
+
+    if (error) throw error;
+  }
+
+  // -----------------------------------------------------------------------------
+
+  // ----------------------------- PRICE CREATED -----------------------------
+
+  if (receivedEvent.type === "price.created") {
+    const { data, error } = await supabase
+      .from("prices")
+      .insert({
+        id: receivedEvent.data.object.id,
+        product_id: receivedEvent.data.object.product,
+        active: receivedEvent.data.object.active,
+        unit_amount: receivedEvent.data.object.unit_amount,
+        currency: receivedEvent.data.object.currency,
+        type: receivedEvent.data.object.type,
+        interval: receivedEvent.data.object.recurring.interval,
+        interval_count: receivedEvent.data.object.recurring.interval_count,
+        trial_period_days:
+          receivedEvent.data.object.recurring.trial_period_days,
+      });
+
+    if (error) throw error;
+  }
+
+  // -----------------------------------------------------------------------------
+
+  // ----------------------------- CUSTOMER CREATED -----------------------------
 
   if (receivedEvent.type === "customer.created") {
-    // customerEmail = receivedEvent.data.object.email;
-    console.log("email: ", customerEmail);
-
     const { data, error } = await supabase
       .from("customers")
       .update({ stripe_customer_id: receivedEvent.data.object.id })
@@ -53,10 +96,11 @@ Deno.serve(async (request) => {
     if (error) throw error;
   }
 
-  if (receivedEvent.type === "customer.subscription.created") {
-    // console.log("Subscripción creada");
-    console.log("customer: ", receivedEvent.data.object.customer);
+  // -----------------------------------------------------------------------------
 
+  // ----------------------------- SUBSCRIPTION CREATED -----------------------------
+
+  if (receivedEvent.type === "customer.subscription.created") {
     const { data: customerData, error: customerError } = await supabase
       .from("customers")
       .select("*")
@@ -68,30 +112,33 @@ Deno.serve(async (request) => {
       throw new Error();
     }
 
-    console.log(customerData);
-
     const { data, error } = await supabase
       .from("subscriptions")
       .insert({
         user_id: customerData.uuid,
-        status: receivedEvent.status,
-        price_id: receivedEvent.data.object.plan.id,
+        status: receivedEvent.data.object.status,
+        // price_id: receivedEvent.data.object.plan.id, // Añadir cuando los prices esten corregidos en el Front
         quantity: 1,
-        // cancel_at_period_end: receivedEvent.data.object.cancel_at_period_end,
-        // current_period_start: receivedEvent.data.object.current_period_start,
-        // current_period_end: receivedEvent.data.object.current_period_end,
-        // ended_at: receivedEvent.data.object.ended_at,
-        // cancel_at: receivedEvent.data.object.cancel_at,
-        // canceled_at: receivedEvent.data.object.canceled_at,
-        trial_start: receivedEvent.data.object.trial_start,
-        trial_end: receivedEvent.data.object.trial_end,
+        cancel_at_period_end: receivedEvent.data.object.cancel_at_period_end,
+        current_period_start: convertTimestamp(
+          receivedEvent.data.object.current_period_start,
+        ),
+        current_period_end: convertTimestamp(
+          receivedEvent.data.object.current_period_end,
+        ),
+        ended_at: convertTimestamp(receivedEvent.data.object.ended_at),
+        cancel_at: convertTimestamp(receivedEvent.data.object.cancel_at),
+        canceled_at: convertTimestamp(receivedEvent.data.object.canceled_at),
+        trial_start: convertTimestamp(receivedEvent.data.object.trial_start),
+        trial_end: convertTimestamp(receivedEvent.data.object.trial_end),
       });
     if (error) throw error;
-    console.log(data);
   }
 
   return new Response(JSON.stringify({ message: "nice!" }), { status: 200 });
 });
+
+// -----------------------------------------------------------------------------
 
 /* To invoke locally:
 
@@ -104,13 +151,3 @@ Deno.serve(async (request) => {
     --data '{"name":"Functions"}'
 
 */
-
-/**
- * BACKUP:
- begin
-  insert into public.users (id, full_name, avatar_url )
-  values (new.id, new.raw_user_meta_data->>'full_name', new.raw_user_meta_data->>'avatar_url');
-  return new;
-end;
-
- */
