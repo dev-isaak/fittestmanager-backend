@@ -62,6 +62,24 @@ Deno.serve(async (request) => {
 
   // -----------------------------------------------------------------------------
 
+  // ----------------------------- PRODUCT UPDATED -----------------------------
+
+  if (receivedEvent.type === "product.updated") {
+    const { data, error } = await supabase
+      .from("products")
+      .update({
+        active: receivedEvent.data.object.active,
+        name: receivedEvent.data.object.name,
+        image: receivedEvent.data.object.images[0],
+        description: receivedEvent.data.object.description,
+      })
+      .eq("id", receivedEvent.data.object.id);
+
+    if (error) throw error;
+  }
+
+  // -----------------------------------------------------------------------------
+
   // ----------------------------- PRICE CREATED -----------------------------
 
   if (receivedEvent.type === "price.created") {
@@ -79,6 +97,30 @@ Deno.serve(async (request) => {
         trial_period_days:
           receivedEvent.data.object.recurring.trial_period_days,
       });
+
+    if (error) throw error;
+  }
+
+  // -----------------------------------------------------------------------------
+
+  // ----------------------------- PRICE UPDATED -----------------------------
+
+  if (receivedEvent.type === "price.updated") {
+    const { data, error } = await supabase
+      .from("prices")
+      .update({
+        product_id: receivedEvent.data.object.product,
+        metadata: receivedEvent.data.object.metadata,
+        active: receivedEvent.data.object.active,
+        unit_amount: receivedEvent.data.object.unit_amount,
+        currency: receivedEvent.data.object.currency,
+        type: receivedEvent.data.object.type,
+        interval: receivedEvent.data.object.recurring.interval,
+        interval_count: receivedEvent.data.object.recurring.interval_count,
+        trial_period_days:
+          receivedEvent.data.object.recurring.trial_period_days,
+      })
+      .eq("id", receivedEvent.data.object.id);
 
     if (error) throw error;
   }
@@ -134,6 +176,45 @@ Deno.serve(async (request) => {
       });
     if (error) throw error;
   }
+
+  // ----------------------------- SUBSCRIPTION UPDATED -----------------------------
+
+  if (receivedEvent.type === "customer.subscription.updated") {
+    const { data: customerData, error: customerError } = await supabase
+      .from("customers")
+      .select("*")
+      .eq("stripe_customer_id", receivedEvent.data.object.customer)
+      .single();
+
+    if (customerError) {
+      console.log(customerError);
+      throw new Error();
+    }
+    const { data, error } = await supabase
+      .from("subscriptions")
+      .update({
+        status: receivedEvent.data.object.status,
+        // price_id: receivedEvent.data.object.plan.id, // Añadir cuando los prices esten corregidos en el Front
+        quantity: 1,
+        cancel_at_period_end: receivedEvent.data.object.cancel_at_period_end,
+        current_period_start: convertTimestamp(
+          receivedEvent.data.object.current_period_start,
+        ),
+        current_period_end: convertTimestamp(
+          receivedEvent.data.object.current_period_end,
+        ),
+        ended_at: convertTimestamp(receivedEvent.data.object.ended_at),
+        cancel_at: convertTimestamp(receivedEvent.data.object.cancel_at),
+        canceled_at: convertTimestamp(receivedEvent.data.object.canceled_at),
+        trial_start: convertTimestamp(receivedEvent.data.object.trial_start),
+        trial_end: convertTimestamp(receivedEvent.data.object.trial_end),
+      })
+      .eq("user_id", customerData.uuid);
+
+    if (error) throw error;
+  }
+
+  // -----------------------------------------------------------------------------
 
   return new Response(JSON.stringify({ message: "nice!" }), { status: 200 });
 });
